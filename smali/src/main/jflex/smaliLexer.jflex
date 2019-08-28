@@ -18,6 +18,11 @@ import static org.jf.smali.smaliParser.*;
 %column
 %char
 
+%ctorarg int apiLevel
+%init{
+    this.apiLevel = apiLevel;
+%init}
+
 %{
     private StringBuffer sb = new StringBuffer();
     private String stringOrCharError = null;
@@ -30,6 +35,8 @@ import static org.jf.smali.smaliParser.*;
     private File sourceFile;
 
     private boolean suppressErrors;
+
+    private int apiLevel;
 
     public Token nextToken() {
         try {
@@ -129,6 +136,13 @@ import static org.jf.smali.smaliParser.*;
         return invalidToken(message, yytext());
     }
 
+    private Token simpleNameToken(String text, boolean quoted) {
+        if (quoted) {
+          text = text.substring(1, text.length() - 1); /* strip backticks */
+        }
+        return newToken(SIMPLE_NAME, text);
+    }
+
     private void beginStringOrChar(int state) {
         yybegin(state);
         sb.setLength(0);
@@ -225,8 +239,12 @@ HighSurrogate = [\ud800-\udbff]
 LowSurrogate = [\udc00-\udfff]
 
 SimpleNameCharacter = ({HighSurrogate} {LowSurrogate}) | [A-Za-z0-9$\-_\u00a1-\u1fff\u2010-\u2027\u2030-\ud7ff\ue000-\uffef]
+UnicodeSpace = [\u0020\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000] /* Zs category */
 
-SimpleName = {SimpleNameCharacter}+
+SimpleNameRaw = {SimpleNameCharacter}+
+SimpleNameQuoted = [`] {SimpleNameCharacter}+ [`]
+SimpleNameQuotedWithSpaces = [`] ({SimpleNameCharacter} | {UnicodeSpace})+ [`]
+SimpleName = {SimpleNameRaw} | {SimpleNameQuoted} | {SimpleNameQuotedWithSpaces}
 
 PrimitiveType = [ZBSCIJFD]
 
@@ -682,8 +700,16 @@ Type = {PrimitiveType} | {ClassDescriptor} | {ArrayPrefix} ({ClassDescriptor} | 
         yybegin(PARAM_LIST);
     }
 
-    {SimpleName} { return newToken(SIMPLE_NAME); }
-    "<" {SimpleName} ">" { return newToken(MEMBER_NAME); }
+    {SimpleNameRaw} { return simpleNameToken(yytext(), false); }
+    {SimpleNameQuoted} { return simpleNameToken(yytext(), true); }
+    {SimpleNameQuotedWithSpaces} {
+      if (apiLevel < 30) {
+        String message = "spaces in SimpleName are not allowed prior to API level 30";
+        return new InvalidToken(message, yytext());
+      }
+      return simpleNameToken(yytext(), true);
+    }
+    "<" {SimpleNameRaw} ">" { return newToken(MEMBER_NAME); }
 }
 
 /*Symbols/Whitespace/EOF*/
